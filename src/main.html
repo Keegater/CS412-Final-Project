@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>CS412 Final Project</title>
+    <style>
+        body { 
+            margin: 0; 
+            background: #111; 
+            color: #ccc;
+            font-family: monospace;
+            padding: 20px;
+        }
+        canvas {
+            border: 1px solid #444;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        .canvas-container {
+            display: flex;
+            flex-direction: column;
+        }
+        .controls {
+            margin-top: 10px;
+        }
+        .controls label {
+            display: block;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+
+<h2>CS412 Final Project - Keegan Murphy - Jagat Subedi</h2>
+<p>Description / instructions <br>
+temp text</p>
+
+<div class="container">
+    <div class="canvas-container">
+        <canvas id="glCanvas" width="800" height="600"></canvas>
+    </div>
+</div>
+    
+
+<script>
+    (async function() {
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl2');
+
+        if (!gl) {
+            alert('WebGL 2 not supported in this browser');
+            throw new Error('WebGL 2 not supported');
+        }
+        
+
+        const vertexShaderSource = await fetch('vertex.glsl').then((res) => {
+            if (!res.ok) {
+                throw new Error('Failed to load vertex.glsl: ' + res.status + ' ' + res.statusText);
+            }
+            return res.text();
+        });
+        const fragmentShaderSource = await fetch('fragment.glsl').then((res) => {
+            if (!res.ok) {
+                throw new Error('Failed to load fragment.glsl: ' + res.status + ' ' + res.statusText);
+            }
+            return res.text();
+        });
+
+        let program, positionLocation, resolutionLocation, timeLocation, maxBouncesLocation, ambientStrengthLocation;
+        let camPosLocation, camForwardLocation, camRightLocation, camUpLocation;
+        let centerLightColorLocation, centerLightBrightnessLocation;
+        let vao, positionBuffer;
+
+        // Central light UI
+        let centerLightColor = [0.56, 1.0, 1.0];
+        let centerLightBrightness = 0.80; // 0 -> 10
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                throw new Error(gl.getShaderInfoLog(shader));
+            }
+
+            return shader;
+        }
+
+        function createProgram(gl, vsSource, fsSource) {
+            const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+            const prog = gl.createProgram();
+            gl.attachShader(prog, vs);
+            gl.attachShader(prog, fs);
+            gl.linkProgram(prog);
+
+            if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+                throw new Error(gl.getProgramInfoLog(prog));
+            }
+
+            return prog;
+        }
+
+        const positions = new Float32Array([
+            -1, -1,
+            1, -1,
+            -1, 1,
+            1, 1
+        ]);
+
+        // Initialize buffers
+        function initBuffers() {
+            positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+            vao = gl.createVertexArray();
+            gl.bindVertexArray(vao);
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.enableVertexAttribArray(positionLocation);
+            gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+            gl.bindVertexArray(null);
+        }
+
+        function initShaderProgram() {
+            try {
+                program = createProgram(gl, vertexShaderSource, fragmentShaderSource);
+                gl.useProgram(program);
+                positionLocation = gl.getAttribLocation(program, 'position');
+                resolutionLocation = gl.getUniformLocation(program, 'u_resolution');
+                timeLocation = gl.getUniformLocation(program, 'u_time');
+                maxBouncesLocation = gl.getUniformLocation(program, 'u_maxBounces');
+                ambientStrengthLocation = gl.getUniformLocation(program, 'u_ambientStrength');
+
+                // Camera
+                camPosLocation = gl.getUniformLocation(program, 'u_camPos');
+                camForwardLocation = gl.getUniformLocation(program, 'u_camForward');
+                camRightLocation = gl.getUniformLocation(program, 'u_camRight');
+                camUpLocation = gl.getUniformLocation(program, 'u_camUp');
+
+                // Light controls
+                centerLightColorLocation = gl.getUniformLocation(program, 'u_centerLightColor');
+                centerLightBrightnessLocation = gl.getUniformLocation(program, 'u_centerLightBrightness');
+
+                initBuffers();
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        initShaderProgram();
+
+
+        let maxBounces = 8;
+        let ambientStrength = 0.00; // mapped 1000 -> 1)
+
+
+        // Camera state (spherical coordinates)
+        let camTarget = [0.0, 0.0, 0.0];
+        let camRadius = 42.0;   // distance from center
+        let camTheta = 0.0;    // horizontal angle (rads)
+        let camPhi = 0.1;      // vertical angle (rads)
+
+        // Vector helpers
+        function normalize3(v) {
+            const len = Math.hypot(v[0], v[1], v[2]) || 1.0;
+            return [v[0] / len, v[1] / len, v[2] / len];
+        }
+
+        function cross3(a, b) {
+            return [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0]
+            ];
+        }
+
+        function length3(v) {
+            return Math.hypot(v[0], v[1], v[2]);
+        }
+
+        function updateCameraUniforms() {
+            if (!program) return;
+
+            // Convert spherical to Cartesian position
+            const cp = [
+                camTarget[0] + camRadius * Math.cos(camPhi) * Math.sin(camTheta),
+                camTarget[1] + camRadius * Math.sin(camPhi),
+                camTarget[2] + camRadius * Math.cos(camPhi) * Math.cos(camTheta)
+            ];
+
+            // Forward points from camera to target
+            const forward = normalize3([
+                camTarget[0] - cp[0],
+                camTarget[1] - cp[1],
+                camTarget[2] - cp[2]
+            ]);
+
+            let worldUp = [0.0, 1.0, 0.0];
+            let right = cross3(forward, worldUp);
+            if (length3(right) < 1e-3) {
+                // Too close to poles, switch up vector
+                worldUp = [0.0, 0.0, 1.0];
+                right = cross3(forward, worldUp);
+            }
+            right = normalize3(right);
+            const up = normalize3(cross3(right, forward));
+
+            gl.useProgram(program);
+            if (camPosLocation)      gl.uniform3f(camPosLocation, cp[0], cp[1], cp[2]);
+            if (camForwardLocation)  gl.uniform3f(camForwardLocation, forward[0], forward[1], forward[2]);
+            if (camRightLocation)    gl.uniform3f(camRightLocation, right[0], right[1], right[2]);
+            if (camUpLocation)       gl.uniform3f(camUpLocation, up[0], up[1], up[2]);
+        }
+
+        // UI Controls
+        const controls = document.createElement('div');
+        controls.className = 'controls';
+
+        // Max bounce slider
+        const bouncesLabel = document.createElement('label');
+        bouncesLabel.textContent = 'Max bounces ';
+        const bouncesSlider = document.createElement('input');
+        bouncesSlider.type = 'range';
+        bouncesSlider.min = '1';
+        bouncesSlider.max = '8';
+        bouncesSlider.value = String(maxBounces);
+        const bouncesValue = document.createElement('span');
+        bouncesValue.textContent = ' ' + maxBounces;
+        bouncesLabel.appendChild(bouncesSlider);
+        bouncesLabel.appendChild(bouncesValue);
+
+        // Ambient strength slider (0->1000 mapped to 0->1)
+        const ambientLabel = document.createElement('label');
+        ambientLabel.textContent = 'Ambient ';
+        const ambientSlider = document.createElement('input');
+        ambientSlider.type = 'range';
+        ambientSlider.min = '0';
+        ambientSlider.max = '1000';
+        ambientSlider.value = String(Math.round(ambientStrength * 1000.0)); // 1000 steps
+        const ambientValue = document.createElement('span');
+        ambientValue.textContent = ' ' + ambientStrength.toFixed(2);
+        ambientLabel.appendChild(ambientSlider);
+        ambientLabel.appendChild(ambientValue);
+
+        controls.appendChild(bouncesLabel);
+        controls.appendChild(ambientLabel);
+
+        // Light sphere color & brightness controls
+        function addOrbitLightSlider(labelText, min, max, value, onChange) {
+            const label = document.createElement('label');
+            label.textContent = labelText + ' ';
+            const slider = document.createElement('input');
+            slider.type = 'range';
+            slider.min = String(min);
+            slider.max = String(max);
+            slider.value = String(value);
+            const span = document.createElement('span');
+            span.textContent = ' ' + value;
+            slider.addEventListener('input', () => {
+                const v = parseInt(slider.value, 10);
+                span.textContent = ' ' + v;
+                onChange(v);
+            });
+            label.appendChild(slider);
+            label.appendChild(span);
+            controls.appendChild(label);
+        }
+
+        // Center light controls
+        addOrbitLightSlider('Center light R', 0, 255, 255, (v) => {
+            centerLightColor[0] = v / 255.0;
+        });
+        addOrbitLightSlider('Center light G', 0, 255, 237, (v) => {
+            centerLightColor[1] = v / 255.0;
+        });
+        addOrbitLightSlider('Center light B', 0, 255, 204, (v) => {
+            centerLightColor[2] = v / 255.0;
+        });
+        addOrbitLightSlider('Center light brightness', 0, 1000, Math.round(centerLightBrightness * 100), (v) => {
+            centerLightBrightness = v / 100.0; // 0->1000 to 0->10
+        });
+
+        // Attach controls
+        canvas.parentElement.appendChild(controls);
+
+        bouncesSlider.addEventListener('input', () => {
+            maxBounces = parseInt(bouncesSlider.value, 10);
+            bouncesValue.textContent = ' ' + maxBounces;
+        });
+
+        ambientSlider.addEventListener('input', () => {
+            ambientStrength = parseInt(ambientSlider.value, 10) / 1000.0; // 0->1000 to 0->1
+            ambientValue.textContent = ' ' + ambientStrength.toFixed(2);
+        });
+
+        // Mouse controls
+        let isDragging = false;
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+
+        // ------------- Might use later?? Commented out for now ------------------
+
+        // canvas.addEventListener('mousedown', (e) => {
+        //     isDragging = true;
+        //     lastMouseX = e.clientX;
+        //     lastMouseY = e.clientY;
+        // });
+
+        // window.addEventListener('mouseup', () => {
+        //     isDragging = false;
+        // });
+
+        // window.addEventListener('mousemove', (e) => {
+        //     if (!isDragging) return;
+        //     const dx = e.clientX - lastMouseX;
+        //     const dy = e.clientY - lastMouseY;
+        //     lastMouseX = e.clientX;
+        //     lastMouseY = e.clientY;
+
+        //     const rotSpeed = 0.005;
+        //     camTheta += dx * rotSpeed;      // horizontal
+        //     camPhi += -dy * rotSpeed;       // vertical
+
+        //     const maxPhi = Math.PI / 2 - 0.1;
+        //     const minPhi = -maxPhi;
+        //     if (camPhi > maxPhi) camPhi = maxPhi;
+        //     if (camPhi < minPhi) camPhi = minPhi;
+        // });
+
+        // Zoom controls
+        window.addEventListener('keydown', (e) => {
+            const zoomSpeed = 0.3;
+            if (e.key === 'ArrowUp') {
+                camRadius = Math.max(2.0, camRadius - zoomSpeed);
+            } else if (e.key === 'ArrowDown') {
+                camRadius = Math.min(100.0, camRadius + zoomSpeed);
+            }
+        });
+
+        let startTime = Date.now();
+        function render() {
+            const time = (Date.now() - startTime) / 1000.0;
+
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.clearColor(0, 0, 0, 1);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.useProgram(program);
+            gl.bindVertexArray(vao);
+
+            gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
+            gl.uniform1f(timeLocation, time);
+            gl.uniform1i(maxBouncesLocation, maxBounces);
+            gl.uniform1f(ambientStrengthLocation, ambientStrength);
+
+            if (centerLightColorLocation) gl.uniform3f(
+                centerLightColorLocation,
+                centerLightColor[0], centerLightColor[1], centerLightColor[2]
+            );
+            if (centerLightBrightnessLocation) gl.uniform1f(
+                centerLightBrightnessLocation,
+                centerLightBrightness
+            );
+
+            updateCameraUniforms();
+
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+            requestAnimationFrame(render);
+        }
+
+        requestAnimationFrame(render);
+    })();
+</script>
+
+</body>
+</html>
