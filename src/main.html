@@ -383,16 +383,16 @@ temp text</p>
         }
 
         // Center light controls
-        addOrbitLightSlider('Center light R', 0, 255, 255, (v) => {
+        addOrbitLightSlider('Wall lights R', 0, 255, 255, (v) => {
             centerLightColor[0] = v / 255.0;
         });
-        addOrbitLightSlider('Center light G', 0, 255, 237, (v) => {
+        addOrbitLightSlider('Wall lights G', 0, 255, 237, (v) => {
             centerLightColor[1] = v / 255.0;
         });
-        addOrbitLightSlider('Center light B', 0, 255, 204, (v) => {
+        addOrbitLightSlider('Wall lights B', 0, 255, 204, (v) => {
             centerLightColor[2] = v / 255.0;
         });
-        addOrbitLightSlider('Center light brightness', 0, 1000, Math.round(centerLightBrightness * 100), (v) => {
+        addOrbitLightSlider('Wall lights brightness', 0, 1000, Math.round(centerLightBrightness * 100), (v) => {
             centerLightBrightness = v / 100.0; // 0->1000 to 0->10
         });
 
