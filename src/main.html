@@ -493,10 +493,11 @@ temp text</p>
             }
         });
 
+        //scorecard regulation
         function updateScore(){
             document.getElementById("scorecard").textContent = leftScore + " - " + rightScore;
         }
-
+        // display who won
         function declareWinner(won){
             gameOver = true;
             let message = "";
@@ -509,9 +510,10 @@ temp text</p>
             document.getElementById("winner").textContent = message;
         }
 
+        //check winner
         function winnerCheck(){
             if(gameOver) return;
-
+            //right won
             if(ballPosX < -ballOutX){
                 rightScore++;
                 updateScore();
@@ -522,6 +524,7 @@ temp text</p>
                     resetBall();
                 }
             }
+            //left won
             if(ballPosX > ballOutX){
                 leftScore++;
                 updateScore();
@@ -534,6 +537,7 @@ temp text</p>
             }
         }
 
+        //reset and start ball from center
         function resetBall(){
             ballPosX = 0.0;
             ballPosY = 0.0;
