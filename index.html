@@ -40,7 +40,8 @@
 <h3 id = "scorecard">0 - 0</h3>
 <h3 id = "winner" style= "color:#4ff; height:20px;"></h3>
 <p>Description / instructions <br>
-temp text</p>
+In Single player mode use arrow up/down key to control right paddle<br>
+In Multiplayer mode use arrow up/down to control right paddle and 'w'/'s' to control left paddle.</p>
 
 <div class="container">
     <div class="canvas-container">
@@ -563,7 +564,7 @@ temp text</p>
         function updateScore(){
             document.getElementById("scorecard").textContent = leftScore + " - " + rightScore;
         }
-        
+
         // display who won
         function declareWinner(won){
             gameOver = true;
